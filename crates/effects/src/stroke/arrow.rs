@@ -267,6 +267,8 @@ fn local_stop(kind: Arrowhead) -> Stop {
         Arrowhead::DoubleArrow => Stop::At(1.7),
         Arrowhead::HalfCircle => Stop::At(1.0),
         Arrowhead::Concave => Stop::At(2.6),
+        // Hide the line beneath the solid head without covering the rear V-notch.
+        Arrowhead::ExamNotched => Stop::At(2.4),
         Arrowhead::Hexagon => Stop::At(HEX / 2.0),
         _ => Stop::At(2.0),
     }
@@ -295,6 +297,16 @@ fn local(kind: Arrowhead) -> BezPath {
     };
     let hexagon = star((HEX / 2.0, 0.0), &[2.0], 6, PI / 6.0);
     match kind {
+        // Six-vertex filled head traced from the provided Illustrator reference.
+        // Local x runs backward from the tip; y is perpendicular to the line.
+        Arrowhead::ExamNotched => poly(&mut p, &[
+            (0.0, 0.0),
+            (2.04, -0.46),
+            (4.0, -1.22),
+            (3.38, 0.0),
+            (4.0, 1.22),
+            (2.04, 0.46),
+        ]),
         Arrowhead::Barbed => poly(&mut p, &[(0.0, 0.0), (3.6, 2.0), (2.6, 0.55), (4.0, 0.55), (4.0, -0.55), (2.6, -0.55), (3.6, -2.0)]),
         Arrowhead::HalfArrowLeft => poly(&mut p, &[(0.0, 0.0), (4.0, -2.0), (3.0, -0.5), (3.0, 0.5), (1.0, 0.5)]),
         Arrowhead::HalfArrowRight => poly(&mut p, &[(0.0, 0.0), (4.0, 2.0), (3.0, 0.5), (3.0, -0.5), (1.0, -0.5)]),

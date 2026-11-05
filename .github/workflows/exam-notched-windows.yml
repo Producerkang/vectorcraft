@@ -1,0 +1,49 @@
+name: Exam Notched Windows Build
+
+on:
+  push:
+    branches: [feature/exam-notched-arrow]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-C target-feature=+crt-static"
+    steps:
+      - name: Checkout custom fork
+        uses: actions/checkout@v4
+
+      - name: Update Rust toolchain
+        shell: pwsh
+        run: rustup update stable
+
+      - name: Test arrowhead geometry and serialization
+        shell: pwsh
+        run: cargo test --release --locked -p vectorcraft-doc -p vectorcraft-effects
+
+      - name: Build customized desktop application
+        shell: pwsh
+        run: cargo build --release --locked -p vectorcraft
+
+      - name: Prepare standalone portable folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-exam-arrow | Out-Null
+          Copy-Item target\release\vectorcraft.exe dist-exam-arrow\vectorcraft.exe
+          Copy-Item packaging\windows\portable.txt dist-exam-arrow\portable.txt
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE dist-exam-arrow
+
+      - name: Upload Windows portable application
+        uses: actions/upload-artifact@v4
+        with:
+          name: VectorCraft-Exam-Notched-Windows-x64
+          path: dist-exam-arrow/
+          if-no-files-found: error
