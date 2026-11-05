@@ -20,3 +20,9 @@ cargo build --release -p vectorcraft
 ```
 
 Original copyright, license and NOTICE files remain unchanged. The custom variant appears in the Stroke panel's arrowhead menu.
+
+## Windows portable build from GitHub Actions
+
+On this fork open **Actions** and enable workflows if GitHub asks. Run **Exam Notched Windows Build**, or view the run created by a push/PR. After a successful run, download the `VectorCraft-Exam-Notched-Windows-x64` artifact and extract the whole directory outside the official installation folder. Launch `vectorcraft.exe` from that directory. The `portable.txt` marker keeps local settings in a `VectorCraftData` sibling directory. This custom executable is unsigned; Windows may display a publisher warning. Only run binaries you built in your own repository.
+
+The Windows build workflow is intended for x64 PCs; it does not automatically install or replace the official VectorCraft program.
