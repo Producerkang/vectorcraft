@@ -56,12 +56,8 @@ impl VectorcraftApp {
 pub(crate) fn check(app: &mut VectorcraftApp) -> Result<Value, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        app.updates_rt.check_requested = true;
-        app.updates_rt.manual_window_open = true;
-        if let Some(ctx) = &app.updates_rt.repaint {
-            ctx.request_repaint();
-        }
-        Ok(Value::Null)
+        let _ = app;
+        Err("Custom VectorCraft build: official self-updates are disabled. Merge upstream into your fork and rebuild to update safely.".into())
     }
     #[cfg(target_arch = "wasm32")]
     {
