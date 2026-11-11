@@ -73,11 +73,13 @@ jobs:
           grep -q 'CustomUpdate' crates/ui-egui/src/updates_ui.rs
           sha="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/$candidate"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "upstream_tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=100.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          {
+            echo "ready=true"
+            echo "candidate=$candidate"
+            echo "sha=$sha"
+            echo "upstream_tag=$tag"
+            echo "version=100.0.$GITHUB_RUN_NUMBER"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
