@@ -1,8 +1,6 @@
 name: Exam Notched Windows Build
 
 on:
-  push:
-    branches: [feature/exam-notched-arrow]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -46,4 +44,5 @@ jobs:
         with:
           name: VectorCraft-Exam-Notched-Windows-x64
           path: dist-exam-arrow/
+          retention-days: 7
           if-no-files-found: error
