@@ -1,0 +1,199 @@
+# Unofficial personal fork release channel: official stable source + custom arrow.
+# Never install official artifacts over the personalized build.
+name: Custom VectorCraft Update Channel
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Daily check of the latest PUBLISHED stable VectorCraft release (UTC).
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-vectorcraft-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.prepare.outputs.ready }}
+      candidate: ${{ steps.prepare.outputs.candidate }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      upstream_tag: ${{ steps.prepare.outputs.upstream_tag }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge official stable release into an isolated candidate
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add official https://github.com/storytold/vectorcraft.git
+          tag="$(gh api repos/storytold/vectorcraft/releases/latest --jq '.tag_name')"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The upstream latest published release is not a stable X.Y.Z tag: $tag"
+            exit 1
+          fi
+          git fetch --no-tags official "refs/tags/$tag:refs/tags/synced/$tag"
+          upstream_sha="$(git rev-parse "refs/tags/synced/$tag^{commit}")"
+          main_sha="$(git rev-parse HEAD)"
+          latest_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.target_commitish' 2>/dev/null || true)"
+          if git merge-base --is-ancestor "$upstream_sha" HEAD && [[ "$latest_target" == "$main_sha" ]]; then
+            echo "Already synchronized and published ($tag; $main_sha)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          candidate="automation/custom-candidate-$GITHUB_RUN_ID"
+          git switch -c "$candidate"
+          if ! git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            echo "Merging the official stable release $tag ($upstream_sha)."
+            if ! git merge --no-edit "$upstream_sha"; then
+              echo "::error::Merge conflict: release blocked; keep the last working personal build."
+              git merge --abort || true
+              exit 1
+            fi
+          fi
+          # Fail closed: a conflict-free merge still must preserve our customization.
+          grep -q 'ExamNotched' crates/doc/src/appearance/stroke_style.rs
+          grep -q 'Producerkang/vectorcraft' crates/ui-egui/src/lib.rs
+          grep -q 'CustomUpdate' crates/ui-egui/src/updates_ui.rs
+          sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/$candidate"
+          {
+            echo "ready=true"
+            echo "candidate=$candidate"
+            echo "sha=$sha"
+            echo "upstream_tag=$tag"
+            echo "version=100.0.$GITHUB_RUN_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTFLAGS: "-C target-feature=+crt-static"
+    steps:
+      - name: Checkout isolated source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate }}
+
+      - name: Install current Rust stable
+        shell: pwsh
+        run: rustup update stable
+
+      - name: Verify Rust formatting before any release
+        shell: pwsh
+        run: cargo fmt --all -- --check
+
+      - name: Stamp an independent personal release version
+        shell: pwsh
+        env:
+          CUSTOM_VERSION: ${{ needs.prepare.outputs.version }}
+        run: cargo xtask version set $env:CUSTOM_VERSION
+
+      - name: Check arrow serialization, renderer, UI and exports
+        shell: pwsh
+        run: cargo test --release -p vectorcraft-doc -p vectorcraft-effects -p vectorcraft-ui-egui -p vectorcraft-pdf -p vectorcraft-svg
+
+      - name: Build Windows desktop executable
+        shell: pwsh
+        run: cargo build --release -p vectorcraft
+
+      - name: Create checksummed portable release
+        shell: pwsh
+        env:
+          CUSTOM_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item target\release\vectorcraft.exe package\vectorcraft.exe
+          Copy-Item packaging\windows\portable.txt package\portable.txt
+          Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE package
+          $asset = "vectorcraft-$env:CUSTOM_VERSION-windows-x64-portable.zip"
+          Compress-Archive -Path package\* -DestinationPath "release\$asset"
+          $digest = (Get-FileHash -Algorithm SHA256 "release\$asset").Hash.ToLowerInvariant()
+          "$digest  $asset" | Set-Content -Encoding ascii release\SHA256SUMS.txt
+
+      - name: Retain temporary build output for seven days
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-release-${{ needs.prepare.outputs.version }}
+          path: release/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Retrieve tested candidate and verify fast-forward
+        env:
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/$CANDIDATE"
+          git switch --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git fetch origin main
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "::error::Main changed after testing; refusing to publish stale source."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: custom-release-${{ needs.prepare.outputs.version }}
+          path: release
+
+      - name: Publish only a successfully tested personal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUSTOM_VERSION: ${{ needs.prepare.outputs.version }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+          UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$CUSTOM_VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::The personal release $tag already exists."
+            exit 1
+          fi
+          (cd release && sha256sum -c SHA256SUMS.txt)
+          # Advance personal main only AFTER Windows tests and build have succeeded.
+          git push origin "HEAD:refs/heads/main"
+          gh release create "$tag" release/*.zip release/SHA256SUMS.txt \
+            --target "$CANDIDATE_SHA" \
+            --latest \
+            --title "VectorCraft Custom $CUSTOM_VERSION" \
+            --notes "UNOFFICIAL personal build (not affiliated with ArtCraft). Official VectorCraft source: $UPSTREAM_TAG. Preserves the custom Exam Notched arrowhead. Portable Windows x64 build only. UNSIGNED: automatic in-app installation is intentionally disabled. Download and unzip into the separate personal build folder. Original licenses and attribution are included."
+          git push origin --delete "$CANDIDATE" || true

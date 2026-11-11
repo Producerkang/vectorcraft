@@ -11,6 +11,9 @@
 pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.vectorcraft.png")),
     accent: Some([0xe8, 0x57, 0x3f]),
+    // Personal build: updates must never come from the official release channel.
+    repo: "Producerkang/vectorcraft",
+    developer: "Producerkang (unofficial)",
     ..craft_update::suite::VECTORCRAFT
 };
 

@@ -94,12 +94,15 @@ pub enum Arrowhead {
     Kite,
     TriangleBar,
     Oval,
+    /// Filled, notched arrowhead for exam diagrams.
+    ExamNotched,
 }
 
 impl Arrowhead {
     /// Every arrowhead, in menu order (arrows, then outlined shapes, then bars and marks).
-    pub const ALL: [Arrowhead; 40] = [
+    pub const ALL: [Arrowhead; 41] = [
         Arrowhead::Arrow,
+        Arrowhead::ExamNotched,
         Arrowhead::ArrowOpen,
         Arrowhead::Barbed,
         Arrowhead::Concave,
@@ -184,6 +187,7 @@ impl Arrowhead {
             Arrowhead::Kite => "Kite",
             Arrowhead::TriangleBar => "Triangle to Bar",
             Arrowhead::Oval => "Oval",
+            Arrowhead::ExamNotched => "Exam Notched",
         }
     }
 }

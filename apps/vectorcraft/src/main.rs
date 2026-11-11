@@ -390,6 +390,8 @@ fn main() -> std::process::ExitCode {
                 prefs_dir::attach_profile_store(&mut session);
                 prefs_dir::attach_plugin_store(&mut session);
                 let mut app = VectorcraftApp::new(session, services(cc.winit_window().cloned(), cc.egui_ctx.clone()));
+                // The custom channel checks only this fork's GitHub Releases.
+                // Unsigned Windows builds offer a manual download, never a self-install.
                 app.set_startup_update_check(true);
                 load_prefs(&mut app, saved);
                 // The saved PDF presets live in their own folder (also read by vectorcraft-cli),
