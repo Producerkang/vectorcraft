@@ -1,28 +1,35 @@
-//! Software updates, background check at startup, and startup prompt modal.
+//! Update checks against the personal fork's releases.
+//!
+//! The upstream Windows self-updater requires an Authenticode-signed executable
+//! from the same publisher. Our unsigned builds deliberately offer only a
+//! download link; no signature-verification bypass or in-place replacement.
 
 use serde_json::Value;
 
 use crate::VectorcraftApp;
 
 #[cfg(not(target_arch = "wasm32"))]
-use craft_update::updater::{Action, Updater};
+use craft_update::updater::Status;
 #[cfg(not(target_arch = "wasm32"))]
-use craft_update::{CheckResultDialog, CheckResultResponse};
+use craft_update::{CheckResultDialog, CheckResultResponse, Release, StartupPrompt, StartupPromptResponse};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 pub(crate) struct Runtime {
     #[cfg(not(target_arch = "wasm32"))]
-    updater: Updater,
-    /// The desktop app turns the check at start on; tests and the web build leave it off.
-    #[cfg(not(target_arch = "wasm32"))]
     startup_check: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    check_requested: bool,
-    /// The context of the last frame, to wake the UI when a check is queued from a menu callback.
+    started: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    repaint: Option<egui::Context>,
-    /// Whether the result of Help ▸ Check for Updates is in view.
+    check_requested: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending: Option<Receiver<Result<Option<Release>, String>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    status: Status,
+    #[cfg(not(target_arch = "wasm32"))]
+    prompt: Option<StartupPrompt>,
+    /// Whether Help ▸ Check for Updates is displaying a result.
     pub(crate) manual_window_open: bool,
-    /// The web build has no updater; its window only says so.
     #[cfg(target_arch = "wasm32")]
     pub(crate) status_message: Option<String>,
 }
@@ -31,13 +38,17 @@ impl Default for Runtime {
     fn default() -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
-            updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")),
-            #[cfg(not(target_arch = "wasm32"))]
             startup_check: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            started: false,
             #[cfg(not(target_arch = "wasm32"))]
             check_requested: false,
             #[cfg(not(target_arch = "wasm32"))]
-            repaint: None,
+            pending: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            status: Status::Idle,
+            #[cfg(not(target_arch = "wasm32"))]
+            prompt: None,
             manual_window_open: false,
             #[cfg(target_arch = "wasm32")]
             status_message: None,
@@ -46,7 +57,7 @@ impl Default for Runtime {
 }
 
 impl VectorcraftApp {
-    /// Whether the app asks for a newer release when it starts (off until the desktop app turns it on).
+    /// Enable one startup check against the custom release channel.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_startup_update_check(&mut self, on: bool) {
         self.updates_rt.startup_check = on;
@@ -56,8 +67,10 @@ impl VectorcraftApp {
 pub(crate) fn check(app: &mut VectorcraftApp) -> Result<Value, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = app;
-        Err("Custom VectorCraft build: official self-updates are disabled. Merge upstream into your fork and rebuild to update safely.".into())
+        app.updates_rt.manual_window_open = true;
+        app.updates_rt.check_requested = true;
+        app.updates_rt.status = Status::Checking;
+        Ok(Value::Null)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -67,17 +80,63 @@ pub(crate) fn check(app: &mut VectorcraftApp) -> Result<Value, String> {
     }
 }
 
+/// Always create a download-only prompt. An unsigned build may not install itself.
+#[cfg(not(target_arch = "wasm32"))]
+fn download_prompt(release: Release) -> StartupPrompt {
+    let mut prompt = StartupPrompt::new(&crate::UPDATE_APP, release, env!("CARGO_PKG_VERSION"));
+    prompt.is_self_updating = false;
+    prompt.status_message = Some(
+        "Personal build: open the release page, download the Windows portable ZIP and replace the old folder after closing the app. Automatic installation requires trusted code signing.".into(),
+    );
+    prompt
+}
+
 pub(crate) fn tick(app: &mut VectorcraftApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let rt = &mut app.updates_rt;
-        rt.repaint = Some(ctx.clone());
-        if std::mem::take(&mut rt.check_requested) {
-            rt.updater.check_now(ctx);
-        } else if rt.startup_check {
-            rt.updater.check_at_start(ctx);
+        let requested = std::mem::take(&mut rt.check_requested);
+        let startup = rt.startup_check && !rt.started;
+        if requested || startup {
+            rt.started = true;
+            if rt.pending.is_none() {
+                rt.status = Status::Checking;
+                let version = env!("CARGO_PKG_VERSION").to_owned();
+                let repaint = ctx.clone();
+                let (tx, rx) = channel();
+                match std::thread::Builder::new().name("custom-update-check".into()).spawn(move || {
+                    let answer = craft_update::Http::new("VectorCraft/CustomUpdate")
+                        .and_then(|http| craft_update::check_for_update(&crate::UPDATE_APP, &http, &version));
+                    let _ = tx.send(answer);
+                    repaint.request_repaint();
+                }) {
+                    Ok(_) => rt.pending = Some(rx),
+                    Err(e) => rt.status = Status::Failed(format!("could not start update check ({e})")),
+                }
+            }
         }
-        rt.updater.tick(ctx);
+        if let Some(rx) = &rt.pending {
+            let result = match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err("update check stopped unexpectedly".into())),
+            };
+            if let Some(result) = result {
+                rt.pending = None;
+                match result {
+                    Ok(Some(release)) => {
+                        rt.prompt = Some(download_prompt(release));
+                        rt.status = Status::Idle;
+                        rt.manual_window_open = false;
+                    }
+                    Ok(None) => rt.status = Status::UpToDate,
+                    Err(e) => {
+                        log::warn!("personal update check failed: {e}");
+                        rt.status = Status::Failed(e);
+                    }
+                }
+            }
+        }
     }
     #[cfg(target_arch = "wasm32")]
     let _ = (app, ctx);
@@ -86,28 +145,33 @@ pub(crate) fn tick(app: &mut VectorcraftApp, ctx: &egui::Context) {
 pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // The restart helper is scheduled before the app closes, so no update starts over unsaved work.
-        let clean = !crate::unsaved::any_dirty(app);
-        match app.updates_rt.updater.show_if(ctx, clean) {
-            Action::OpenUrl(url) => app.open_url(&url),
-            Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            Action::None => {}
-        }
-        // An available update goes to the prompt above, which replaces the result dialog.
+        let mut release_url = None;
         let rt = &mut app.updates_rt;
-        if rt.manual_window_open && rt.updater.prompt_open() {
-            rt.manual_window_open = false;
-        }
-        if rt.manual_window_open {
-            match CheckResultDialog::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")).show(ctx, rt.updater.status()) {
-                CheckResultResponse::None => {}
-                CheckResultResponse::Close => rt.manual_window_open = false,
-                CheckResultResponse::CheckAgain => rt.updater.check_now(ctx),
+        if let Some(prompt) = rt.prompt.as_mut() {
+            match prompt.show(ctx) {
+                StartupPromptResponse::Pending => {}
+                StartupPromptResponse::Later => rt.prompt = None,
+                StartupPromptResponse::Download => {
+                    release_url = Some(prompt.release.html_url.clone());
+                    rt.prompt = None;
+                }
+                // Defensive fail-closed behavior: never self-install an unsigned build.
+                StartupPromptResponse::UpdateAndRestart => {
+                    rt.status = Status::Failed("Automatic installation is disabled for this unsigned personal build.".into());
+                    rt.prompt = None;
+                    rt.manual_window_open = true;
+                }
             }
         }
-        // Closing the dialog dismisses the outcome it showed.
-        if !rt.manual_window_open {
-            rt.updater.dismiss_status();
+        if rt.manual_window_open {
+            match CheckResultDialog::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")).show(ctx, &rt.status) {
+                CheckResultResponse::None => {}
+                CheckResultResponse::Close => rt.manual_window_open = false,
+                CheckResultResponse::CheckAgain => rt.check_requested = true,
+            }
+        }
+        if let Some(url) = release_url {
+            app.open_url(&url);
         }
     }
 
@@ -138,9 +202,6 @@ pub(crate) fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(target_arch = "wasm32"))]
-    use craft_update::updater::Status;
-    use vectorcraft_engine::Session;
 
     #[test]
     fn default_runtime_is_idle() {
@@ -149,29 +210,26 @@ mod tests {
         #[cfg(not(target_arch = "wasm32"))]
         {
             assert!(!rt.startup_check);
-            assert!(!rt.updater.prompt_open());
-            assert_eq!(rt.updater.status(), &Status::Idle);
+            assert!(!rt.started);
+            assert!(rt.pending.is_none());
+            assert!(rt.prompt.is_none());
+            assert_eq!(rt.status, Status::Idle);
         }
     }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn startup_prompt_shows_and_closes() {
-        let mut app = VectorcraftApp::new(Session::new(), Default::default());
-        let ctx = egui::Context::default();
-        let release = craft_update::Release {
-            tag: "v99.0.0".into(),
-            version: craft_update::parse_version("99.0.0"),
-            name: "VectorCraft 99.0.0".into(),
-            html_url: "https://github.com/storytold/vectorcraft/releases/tag/v99.0.0".into(),
+    fn private_channel_never_offers_unsigned_self_install() {
+        assert_eq!(crate::UPDATE_APP.repo, "Producerkang/vectorcraft");
+        let release = Release {
+            tag: "v100.0.2".into(),
+            version: craft_update::parse_version("100.0.2"),
+            name: "Custom VectorCraft".into(),
+            html_url: "https://github.com/Producerkang/vectorcraft/releases/tag/v100.0.2".into(),
             ..Default::default()
         };
-        app.updates_rt.updater.offer(release);
-
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            show(&mut app, ui.ctx());
-        });
-        output.textures_delta.clear();
-        assert!(app.updates_rt.updater.prompt_open());
+        let prompt = download_prompt(release);
+        assert!(!prompt.is_self_updating);
+        assert_eq!(prompt.app.repo, "Producerkang/vectorcraft");
     }
 }
