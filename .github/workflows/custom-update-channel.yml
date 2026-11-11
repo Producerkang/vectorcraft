@@ -186,7 +186,7 @@ jobs:
             echo "::error::The personal release $tag already exists."
             exit 1
           fi
-          sha256sum -c release/SHA256SUMS.txt --ignore-missing
+          (cd release && sha256sum -c SHA256SUMS.txt)
           # Advance personal main only AFTER Windows tests and build have succeeded.
           git push origin "HEAD:refs/heads/main"
           gh release create "$tag" release/*.zip release/SHA256SUMS.txt \
