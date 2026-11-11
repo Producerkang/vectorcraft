@@ -102,6 +102,7 @@ impl Arrowhead {
     /// Every arrowhead, in menu order (arrows, then outlined shapes, then bars and marks).
     pub const ALL: [Arrowhead; 41] = [
         Arrowhead::Arrow,
+        Arrowhead::ExamNotched,
         Arrowhead::ArrowOpen,
         Arrowhead::Barbed,
         Arrowhead::Concave,
@@ -141,7 +142,6 @@ impl Arrowhead {
         Arrowhead::DoubleSlash,
         Arrowhead::Bracket,
         Arrowhead::Fork,
-        Arrowhead::ExamNotched,
     ];
 
     /// The name the arrowhead menus show.

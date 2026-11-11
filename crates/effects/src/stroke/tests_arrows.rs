@@ -89,14 +89,7 @@ fn exam_notched_head_preserves_six_reference_vertices() {
     assert_eq!(rings.len(), 1);
     assert_eq!(rings[0].len(), 6);
     // The test stroke is 2 pt along +x ending at (100, 0).
-    let expected = [
-        (100.0, 0.0),
-        (95.92, -0.92),
-        (92.0, -2.44),
-        (93.24, 0.0),
-        (92.0, 2.44),
-        (95.92, 0.92),
-    ];
+    let expected = [(100.0, 0.0), (95.92, -0.92), (92.0, -2.44), (93.24, 0.0), (92.0, 2.44), (95.92, 0.92)];
     for (actual, (x, y)) in rings[0].iter().zip(expected) {
         assert!((actual.x - x).abs() < 1e-6, "head x: {actual:?} vs {x}");
         assert!((actual.y - y).abs() < 1e-6, "head y: {actual:?} vs {y}");

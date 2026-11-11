@@ -299,14 +299,7 @@ fn local(kind: Arrowhead) -> BezPath {
     match kind {
         // Six-vertex filled head traced from the provided Illustrator reference.
         // Local x runs backward from the tip; y is perpendicular to the line.
-        Arrowhead::ExamNotched => poly(&mut p, &[
-            (0.0, 0.0),
-            (2.04, -0.46),
-            (4.0, -1.22),
-            (3.38, 0.0),
-            (4.0, 1.22),
-            (2.04, 0.46),
-        ]),
+        Arrowhead::ExamNotched => poly(&mut p, &[(0.0, 0.0), (2.04, -0.46), (4.0, -1.22), (3.38, 0.0), (4.0, 1.22), (2.04, 0.46)]),
         Arrowhead::Barbed => poly(&mut p, &[(0.0, 0.0), (3.6, 2.0), (2.6, 0.55), (4.0, 0.55), (4.0, -0.55), (2.6, -0.55), (3.6, -2.0)]),
         Arrowhead::HalfArrowLeft => poly(&mut p, &[(0.0, 0.0), (4.0, -2.0), (3.0, -0.5), (3.0, 0.5), (1.0, 0.5)]),
         Arrowhead::HalfArrowRight => poly(&mut p, &[(0.0, 0.0), (4.0, 2.0), (3.0, 0.5), (3.0, -0.5), (1.0, -0.5)]),
